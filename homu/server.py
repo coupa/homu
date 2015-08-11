@@ -10,6 +10,7 @@ import requests
 import pkg_resources
 from bottle import get, post, run, request, redirect, abort, response
 import hashlib
+import os
 from threading import Thread
 
 import bottle; bottle.BaseRequest.MEMFILE_MAX = 1024 * 1024 * 10
@@ -617,4 +618,9 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     g.mergeable_que = mergeable_que
     g.gh = gh
 
-    run(host=cfg['web'].get('host', ''), port=cfg['web']['port'], server='waitress')
+    # Heroku provides us with a specified port.
+    # We may want to use the configuration file for a port in production.
+    # run(host=cfg['web'].get('host', ''), port=cfg['web']['port'], server='waitress')
+    run(host=cfg['web'].get('host', ''),
+        port=os.environ.get('PORT'),
+        server='waitress')
