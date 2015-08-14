@@ -326,6 +326,7 @@ def github():
                 g.my_username,
                 g.db,
                 realtime=True,
+                sha=state.head_sha,
             ):
                 state.save()
 
