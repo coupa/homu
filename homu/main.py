@@ -11,6 +11,7 @@ import traceback
 import sqlite3
 import requests
 from contextlib import contextmanager
+from functools import partial
 from itertools import chain
 from queue import Queue
 
@@ -349,6 +350,9 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
     elif 'status' in repo_cfg:
         branch = repo_cfg.get('branch', {}).get('auto', 'auto')
         builders = ['status']
+    elif 'testrunners' in repo_cfg:
+        branch = repo_cfg.get('branch', {}).get('auto', 'auto')
+        builders = repo_cfg['testrunners'].get('builders', [])
     else:
         raise RuntimeError('Invalid configuration')
 
@@ -366,11 +370,22 @@ def start_build(state, repo_cfgs, buildbot_slots, logger, db):
 
     logger.info('Starting build of {}/{}#{} on {}: {}'.format(state.owner,
                                                               state.name,
-                                                              state.num, branch, state.merge_sha))
+                                                              state.num,
+                                                              branch,
+                                                              state.merge_sha))
 
     state.set_status('pending')
     desc = '{} commit {:.7} with merge {:.7}...'.format('Trying' if state.try_ else 'Testing', state.head_sha, state.merge_sha)
-    utils.github_create_status(state.get_repo(), state.head_sha, 'pending', '', desc, context='homu')
+    github_create_status = partial(utils.github_create_status,
+                                   repo=state.get_repo(),
+                                   sha=state.head_sha,
+                                   state='pending',
+                                   description=desc)
+    if 'testrunners' in repo_cfg:
+        for builder in builders:
+            github_create_status(context='merge-test/{}'.format(builder))
+    else:
+        github_create_status(context='homu')
 
     state.add_comment(':hourglass: ' + desc)
 
@@ -664,6 +679,8 @@ def main():
                     builders = ['travis']
                 elif 'status' in repo_cfg:
                     builders = ['status']
+                elif 'testrunners' in repo_cfg:
+                    builders = repo_cfg['testrunners'].get('builders', [])
                 else:
                     raise RuntimeError('Invalid configuration')
 
