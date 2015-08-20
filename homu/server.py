@@ -354,7 +354,8 @@ def github():
 
     return 'OK'
 
-def report_build_res(succ, url, builder, repo_label, state, logger):
+def report_build_res(succ, url, builder, repo_label, state, logger,
+                     context='homu'):
     lazy_debug(logger,
                lambda: 'build result {}: builder = {}, succ = {}, current build_res = {}'
                             .format(state, builder, succ, state.build_res_summary()))
@@ -365,7 +366,8 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
         if all(x['res'] for x in state.build_res.values()):
             state.set_status('success')
             desc = 'Test successful'
-            utils.github_create_status(state.get_repo(), state.head_sha, 'success', url, desc, context='homu')
+            utils.github_create_status(state.get_repo(), state.head_sha,
+                                       'success', url, desc, context=context)
 
             urls = ', '.join('[{}]({})'.format(builder, x['url']) for builder, x in sorted(state.build_res.items()))
             state.add_comment(':sunny: {} - {}'.format(desc, urls))
@@ -380,7 +382,9 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
                 except github3.models.GitHubError as e:
                     state.set_status('error')
                     desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
-                    utils.github_create_status(state.get_repo(), state.head_sha, 'error', url, desc, context='homu')
+                    utils.github_create_status(state.get_repo(),
+                                               state.head_sha, 'error', url,
+                                               desc, context=context)
 
                     state.add_comment(':eyes: ' + desc)
 
@@ -388,7 +392,8 @@ def report_build_res(succ, url, builder, repo_label, state, logger):
         if state.status == 'pending':
             state.set_status('failure')
             desc = 'Test failed'
-            utils.github_create_status(state.get_repo(), state.head_sha, 'failure', url, desc, context='homu')
+            utils.github_create_status(state.get_repo(), state.head_sha,
+                                       'failure', url, desc, context=context)
 
             state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
 
@@ -541,6 +546,59 @@ def travis():
     report_build_res(succ, info['build_url'], 'travis', repo_label, state, logger)
 
     return 'OK'
+
+@post('/jenkins')
+@post('/solano')
+def testrunner_callback():
+    builder = request.path.lstrip('/')
+    logger = g.logger.getChild(builder)
+
+    debug = lambda msg: lazy_debug(logger, lambda: msg)
+
+    def error(log_msg):
+        logger.error(log_msg)
+        abort()
+
+    postdata = {k:v for k,v in request.POST.allitems()}
+    debug('postdata: {}'.format(postdata))
+
+    try:
+        commit = request.POST['commit']
+    except KeyError:
+        error('POST to /{} specified no commit.'.format(builder))
+    try:
+        state, repo_label = find_state(commit)
+    except ValueError:
+        error('Invalid commit ID from {}: {}'.format(builder, commit))
+    if builder not in state.build_res:
+        error('{} is not a monitored target for {}'.format(builder, state))
+    try:
+        success = bool(int(request.POST['success']))
+    except KeyError:
+        error('POST to /{} provided no success value.'.format(builder))
+    try:
+        key = g.cfg[builder]['key'].encode('utf-8')
+    except KeyError:
+        error('Configuration is missing {}.key.'.format(builder))
+
+    msg = '{}:{}'.format(commit, request.POST['success']).encode('utf-8')
+    authentic_hmac = hmac.HMAC(key, msg, hashlib.sha256).hexdigest()
+    try:
+        provided_hmac = request.POST['hmac']
+    except KeyError:
+        error('POST to /{} provided no hmac.'.format(builder))
+    if not hmac.compare_digest(provided_hmac, authentic_hmac):
+        error('On POST to /{}, status failed HMAC.'.format(builder))
+
+    debug('state: {}, {}'.format(state, state.build_res_summary()))
+
+    report_build_res(succ=success,
+                     url=request.POST.get('url'),
+                     builder=builder,
+                     repo_label=repo_label,
+                     state=state,
+                     logger=logger,
+                     context='merge-test/{}'.format(builder))
 
 def synch(user_gh, state, repo_label, repo_cfg, repo):
     if not repo.is_collaborator(user_gh.user().login):
