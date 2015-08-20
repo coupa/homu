@@ -363,12 +363,16 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
     state.set_build_res(builder, succ, url)
 
     if succ:
-        if all(x['res'] for x in state.build_res.values()):
-            state.set_status('success')
+        all_tests_passed = all(x['res'] for x in state.build_res.values())
+        repo_cfg = g.repo_cfgs[repo_label]
+
+        if all_tests_passed or 'testrunners' in repo_cfg:
             desc = 'Test successful'
             utils.github_create_status(state.get_repo(), state.head_sha,
                                        'success', url, desc, context=context)
 
+        if all_tests_passed:
+            state.set_status('success')
             urls = ', '.join('[{}]({})'.format(builder, x['url']) for builder, x in sorted(state.build_res.items()))
             state.add_comment(':white_check_mark: {} - {}'.format(desc, urls))
 
