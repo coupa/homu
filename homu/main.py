@@ -233,7 +233,8 @@ def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime
             elif realtime and username != my_username:
                 if cur_sha:
                     msg = '`{}` is not a valid commit SHA.'.format(cur_sha)
-                    state.add_comment(':scream_cat: {} Please try again with `{:.7}`.'.format(msg, state.head_sha))
+                    state.add_comment(':question: {} Please try again with '
+                                      '`{:.7}`.'.format(msg, state.head_sha))
                 else:
                     state.add_comment(':pushpin: Commit {:.7} has been approved by `{}`\n\n<!-- @{} r={} {} -->'.format(state.head_sha, approver, my_username, approver, state.head_sha))
 
@@ -504,12 +505,14 @@ def fetch_mergeability(mergeable_que):
 
                     if mat: issue_or_commit = '#' + mat.group(1)
                     else: issue_or_commit = cause['sha'][:7]
+                    issue_or_commit = \
+                        ' (presumably {})'.format(issue_or_commit)
                 else:
                     issue_or_commit = ''
 
-                state.add_comment(':umbrella: The latest upstream changes{} made this pull request unmergeable. Please resolve the merge conflicts.'.format(
-                    ' (presumably {})'.format(issue_or_commit) if issue_or_commit else '',
-                ))
+                state.add_comment(':x: The latest upstream changes{} made '
+                    'this pull request unmergeable. Please resolve the merge '
+                    'conflicts.'.format(issue_or_commit))
 
             state.set_mergeable(mergeable, que=False)
 

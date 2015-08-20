@@ -370,7 +370,7 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                                        'success', url, desc, context=context)
 
             urls = ', '.join('[{}]({})'.format(builder, x['url']) for builder, x in sorted(state.build_res.items()))
-            state.add_comment(':sunny: {} - {}'.format(desc, urls))
+            state.add_comment(':white_check_mark: {} - {}'.format(desc, urls))
 
             if state.approved_by and not state.try_:
                 try:
@@ -386,7 +386,7 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                                                state.head_sha, 'error', url,
                                                desc, context=context)
 
-                    state.add_comment(':eyes: ' + desc)
+                    state.add_comment(':heavy_exclamation_mark: ' + desc)
 
     else:
         if state.status == 'pending':
@@ -395,7 +395,7 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
             utils.github_create_status(state.get_repo(), state.head_sha,
                                        'failure', url, desc, context=context)
 
-            state.add_comment(':broken_heart: {} - [{}]({})'.format(desc, builder, url))
+            state.add_comment(':x: {} - [{}]({})'.format(desc, builder, url))
 
     g.queue_handler()
 
@@ -466,7 +466,8 @@ def buildbot():
                             if state.status == 'pending':
                                 state.set_status('')
 
-                                desc = ':snowman: The build was interrupted to prioritize another pull request.'
+                                desc = ':warning: The build was interrupted ' \
+                                    'to prioritize another pull request.'
                                 state.add_comment(desc)
                                 utils.github_create_status(state.get_repo(), state.head_sha, 'error', url, desc, context='homu')
 
