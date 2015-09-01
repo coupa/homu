@@ -1,7 +1,9 @@
 import hmac
 import json
 import urllib.parse
-from .main import PullReqState, parse_commands, db_query, INTERRUPTED_BY_HOMU_RE, synchronize
+from .database import Database
+from .main import PullReqState, parse_commands, synchronize
+from .main import INTERRUPTED_BY_HOMU_RE
 from . import utils
 from .utils import lazy_debug
 import github3
@@ -184,6 +186,7 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
 @post('/github')
 def github():
     logger = g.logger.getChild('github')
+    db = Database()
 
     response.content_type = 'text/plain'
 
@@ -225,7 +228,6 @@ def github():
                 repo_cfg,
                 state,
                 g.my_username,
-                g.db,
                 realtime=True,
                 sha=original_commit_id,
             ):
@@ -245,7 +247,10 @@ def github():
             state.save()
 
         elif action in ['opened', 'reopened']:
-            state = PullReqState(pull_num, head_sha, '', g.db, repo_label, g.mergeable_que, g.gh, info['repository']['owner']['login'], info['repository']['name'], g.repos)
+            state = PullReqState(pull_num, head_sha, '', repo_label,
+                                 g.mergeable_que, g.gh,
+                                 info['repository']['owner']['login'],
+                                 info['repository']['name'], g.repos)
             state.title = info['pull_request']['title']
             state.body = info['pull_request']['body']
             state.head_ref = info['pull_request']['head']['repo']['owner']['login'] + ':' + info['pull_request']['head']['ref']
@@ -264,7 +269,6 @@ def github():
                         repo_cfg,
                         state,
                         g.my_username,
-                        g.db,
                     ) or found
 
             state.save()
@@ -277,9 +281,11 @@ def github():
         elif action == 'closed':
             del g.states[repo_label][pull_num]
 
-            db_query(g.db, 'DELETE FROM pull WHERE repo = ? AND num = ?', [repo_label, pull_num])
-            db_query(g.db, 'DELETE FROM build_res WHERE repo = ? AND num = ?', [repo_label, pull_num])
-            db_query(g.db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, pull_num])
+            with db.get_connection() as db_conn:
+                sql = 'DELETE FROM {} WHERE repo = %s AND num = %s'
+                for tbl in ['pull', 'build_res', 'mergeable']:
+                    db_conn.cursor().execute(sql.format(tbl), [repo_label,
+                                                               pull_num])
 
             g.queue_handler()
 
@@ -324,7 +330,6 @@ def github():
                 repo_cfg,
                 state,
                 g.my_username,
-                g.db,
                 realtime=True,
                 sha=state.head_sha,
             ):
@@ -609,12 +614,16 @@ def synch(user_gh, state, repo_label, repo_cfg, repo):
     if not repo.is_collaborator(user_gh.user().login):
         abort(400, 'You are not a collaborator')
 
-    Thread(target=synchronize, args=[repo_label, repo_cfg, g.logger, g.gh, g.states, g.repos, g.db, g.mergeable_que, g.my_username, g.repo_labels]).start()
+    Thread(target=synchronize, args=[repo_label, repo_cfg, g.logger, g.gh,
+                                     g.states, g.repos, g.mergeable_que,
+                                     g.my_username, g.repo_labels]).start()
 
     return 'Synchronizing {}...'.format(repo_label)
 
 @post('/admin')
 def admin():
+    db = Database()
+
     if request.json['secret'] != g.cfg['web']['secret']:
         return 'Authentication failure'
 
@@ -627,7 +636,9 @@ def admin():
         g.repo_cfgs[repo_label] = repo_cfg
         g.repo_labels[repo_cfg['owner'], repo_cfg['name']] = repo_label
 
-        Thread(target=synchronize, args=[repo_label, repo_cfg, g.logger, g.gh, g.states, g.repos, g.db, g.mergeable_que, g.my_username, g.repo_labels]).start()
+        Thread(target=synchronize, args=[repo_label, repo_cfg, g.logger, g.gh,
+                                         g.states, g.repos, g.mergeable_que,
+                                         g.my_username, g.repo_labels]).start()
 
         return 'OK'
 
@@ -635,9 +646,10 @@ def admin():
         repo_label = request.json['repo_label']
         repo_cfg = g.repo_cfgs[repo_label]
 
-        db_query(g.db, 'DELETE FROM pull WHERE repo = ?', [repo_label])
-        db_query(g.db, 'DELETE FROM build_res WHERE repo = ?', [repo_label])
-        db_query(g.db, 'DELETE FROM mergeable WHERE repo = ?', [repo_label])
+        for tbl in ['pull', 'build_res', 'mergeable']:
+            sql = 'DELETE FROM {} WHERE repo = %s'.format(tbl)
+            with db.get_connection() as db_conn:
+                db_conn.cursor().execute(sql, [repo_label])
 
         del g.states[repo_label]
         del g.repos[repo_label]
@@ -659,7 +671,8 @@ def admin():
 
     return 'Unrecognized command'
 
-def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que, gh):
+def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots,
+          my_username, repo_labels, mergeable_que, gh):
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(pkg_resources.resource_filename(__name__, 'html')),
         autoescape = True,
@@ -677,7 +690,6 @@ def start(cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, 
     g.buildbot_slots = buildbot_slots
     g.tpls = tpls
     g.my_username = my_username
-    g.db = db
     g.repo_labels = repo_labels
     g.mergeable_que = mergeable_que
     g.gh = gh

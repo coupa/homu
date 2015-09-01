@@ -1,14 +1,15 @@
 import argparse
 import github3
+import os
 import toml
 import json
 import re
+from .database import Database
 from . import utils
 import logging
 from threading import Thread, Lock
 import time
 import traceback
-import sqlite3
 import requests
 from contextlib import contextmanager
 from functools import partial
@@ -40,11 +41,6 @@ def buildbot_sess(repo_cfg):
 
     sess.get(repo_cfg['buildbot']['url'] + '/logout', allow_redirects=False)
 
-db_query_lock = Lock()
-def db_query(db, *args):
-    with db_query_lock:
-        db.execute(*args)
-
 class PullReqState:
     num = 0
     priority = 0
@@ -55,19 +51,21 @@ class PullReqState:
     base_ref = ''
     assignee = ''
 
-    def __init__(self, num, head_sha, status, db, repo_label, mergeable_que, gh, owner, name, repos):
+    def __init__(self, num, head_sha, status, repo_label, mergeable_que, gh,
+                 owner, name, repos):
         self.head_advanced('', use_db=False)
 
         self.num = num
         self.head_sha = head_sha
         self.status = status
-        self.db = db
         self.repo_label = repo_label
         self.mergeable_que = mergeable_que
         self.gh = gh
         self.owner = owner
         self.name = name
         self.repos = repos
+
+        self.db = Database()
 
     def head_advanced(self, head_sha, *, use_db=True):
         self.head_sha = head_sha
@@ -116,11 +114,16 @@ class PullReqState:
     def set_status(self, status):
         self.status = status
 
-        db_query(self.db, 'UPDATE pull SET status = ? WHERE repo = ? AND num = ?', [self.status, self.repo_label, self.num])
+        sql = 'UPDATE pull SET status = %s WHERE repo = %s AND num = %s'
+        with self.db.get_connection() as db_conn:
+            db_conn.cursor().execute(sql, [self.status, self.repo_label,
+                                           self.num])
 
-        # FIXME: self.try_ should also be saved in the database
-        if not self.try_:
-            db_query(self.db, 'UPDATE pull SET merge_sha = ? WHERE repo = ? AND num = ?', [self.merge_sha, self.repo_label, self.num])
+            # FIXME: self.try_ should also be saved in the database
+            if not self.try_:
+                sql = 'UPDATE pull SET merge_sha = %s WHERE repo = %s AND num = %s'
+                db_conn.cursor().execute(sql, [self.merge_sha, self.repo_label,
+                                               self.num])
 
     def get_status(self):
         return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
@@ -129,14 +132,20 @@ class PullReqState:
         if mergeable is not None:
             self.mergeable = mergeable
 
-            db_query(self.db, 'INSERT OR REPLACE INTO mergeable (repo, num, mergeable) VALUES (?, ?, ?)', [self.repo_label, self.num, self.mergeable])
+            sql = 'REPLACE INTO mergeable (repo, num, mergeable) ' \
+                  'VALUES (%s, %s, %s)'
+            with self.db.get_connection() as db_conn:
+                db_conn.cursor().execute(sql, [self.repo_label, self.num,
+                                               self.mergeable])
         else:
             if que:
                 self.mergeable_que.put([self, cause])
             else:
                 self.mergeable = None
 
-            db_query(self.db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [self.repo_label, self.num])
+            with self.db.get_connection() as db_conn:
+                sql = 'DELETE FROM mergeable WHERE repo = %s AND num = %s'
+                db_conn.cursor().execute(sql, [self.repo_label, self.num])
 
     def init_build_res(self, builders, *, use_db=True):
         self.build_res = {x: {
@@ -145,7 +154,9 @@ class PullReqState:
         } for x in builders}
 
         if use_db:
-            db_query(self.db, 'DELETE FROM build_res WHERE repo = ? AND num = ?', [self.repo_label, self.num])
+            with self.db.get_connection() as db_conn:
+                sql = 'DELETE FROM build_res WHERE repo = %s AND num = %s'
+                db_conn.cursor().execute(sql, [self.repo_label, self.num])
 
     def set_build_res(self, builder, res, url):
         if builder not in self.build_res:
@@ -156,14 +167,13 @@ class PullReqState:
             'url': url,
         }
 
-        db_query(self.db, 'INSERT OR REPLACE INTO build_res (repo, num, builder, res, url, merge_sha) VALUES (?, ?, ?, ?, ?, ?)', [
-            self.repo_label,
-            self.num,
-            builder,
-            res,
-            url,
-            self.merge_sha,
-        ])
+        with self.db.get_connection() as db_conn:
+            db_conn.cursor().execute('REPLACE INTO build_res ' \
+                                     '(repo, num, builder, res, url, ' \
+                                     'merge_sha) VALUES ' \
+                                     '(%s, %s, %s, %s, %s, %s)',
+                                     [self.repo_label, self.num, builder, res,
+                                      url, self.merge_sha])
 
     def build_res_summary(self):
         return ', '.join('{}: {}'.format(builder, data['res'])
@@ -179,22 +189,19 @@ class PullReqState:
         return repo
 
     def save(self):
-        db_query(self.db, 'INSERT OR REPLACE INTO pull (repo, num, status, merge_sha, title, body, head_sha, head_ref, base_ref, assignee, approved_by, priority, try_, rollup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
-            self.repo_label,
-            self.num,
-            self.status,
-            self.merge_sha,
-            self.title,
-            self.body,
-            self.head_sha,
-            self.head_ref,
-            self.base_ref,
-            self.assignee,
-            self.approved_by,
-            self.priority,
-            self.try_,
-            self.rollup,
-        ])
+        with self.db.get_connection() as db_conn:
+            db_conn.cursor().execute('REPLACE INTO pull ' \
+                                     '(repo, num, status, merge_sha, title, ' \
+                                     'body, head_sha, head_ref, base_ref, ' \
+                                     'assignee, approved_by, priority, ' \
+                                     'try_, rollup) VALUES (%s, %s, %s, %s, ' \
+                                     '%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                                     [self.repo_label, self.num, self.status,
+                                      self.merge_sha, self.title, self.body,
+                                      self.head_sha, self.head_ref,
+                                      self.base_ref, self.assignee,
+                                      self.approved_by, self.priority,
+                                      self.try_, self.rollup])
 
     def refresh(self):
         issue = self.get_repo().issue(self.num)
@@ -208,7 +215,8 @@ def sha_cmp(short, full):
 def sha_or_blank(sha):
     return sha if re.match(r'^[0-9a-f]+$', sha) else ''
 
-def parse_commands(body, username, repo_cfg, state, my_username, db, *, realtime=False, sha=''):
+def parse_commands(body, username, repo_cfg, state, my_username, *,
+                   realtime=False, sha=''):
     if username not in repo_cfg['reviewers'] and username != my_username:
         return False
 
@@ -333,7 +341,7 @@ def create_merge(state, repo_cfg, branch):
 
     return merge_commit
 
-def start_build(state, repo_cfgs, buildbot_slots, logger, db):
+def start_build(state, repo_cfgs, buildbot_slots, logger):
     if buildbot_slots[0]:
         return True
 
@@ -462,7 +470,7 @@ def start_build_or_rebuild(state, repo_cfgs, *args):
 
     return start_build(state, repo_cfgs, *args)
 
-def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
+def process_queue(states, repos, repo_cfgs, logger, buildbot_slots):
     for repo_label, repo in repos.items():
         repo_states = sorted(states[repo_label].values())
 
@@ -471,7 +479,7 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
                 break
 
             elif state.status == '' and state.approved_by:
-                if start_build_or_rebuild(state, repo_cfgs, buildbot_slots, logger, db):
+                if start_build_or_rebuild(state, repo_cfgs, buildbot_slots, logger):
                     return
 
             elif state.status == 'success' and state.try_ and state.approved_by:
@@ -479,12 +487,12 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db):
 
                 state.save()
 
-                if start_build(state, repo_cfgs, buildbot_slots, logger, db):
+                if start_build(state, repo_cfgs, buildbot_slots, logger):
                     return
 
         for state in repo_states:
             if state.status == '' and state.try_:
-                if start_build(state, repo_cfgs, buildbot_slots, logger, db):
+                if start_build(state, repo_cfgs, buildbot_slots, logger):
                     return
 
 def fetch_mergeability(mergeable_que):
@@ -522,31 +530,39 @@ def fetch_mergeability(mergeable_que):
         finally:
             mergeable_que.task_done()
 
-def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_que, my_username, repo_labels):
+def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
+                my_username, repo_labels):
     logger.info('Synchronizing {}...'.format(repo_label))
+    db = Database()
 
     repo = gh.repository(repo_cfg['owner'], repo_cfg['name'])
 
-    db_query(db, 'DELETE FROM pull WHERE repo = ?', [repo_label])
-    db_query(db, 'DELETE FROM build_res WHERE repo = ?', [repo_label])
-    db_query(db, 'DELETE FROM mergeable WHERE repo = ?', [repo_label])
+    with db.get_connection() as db_conn:
+        for tbl in ['pull', 'build_res', 'mergeable']:
+            sql = 'DELETE FROM {} WHERE repo = %s'.format(tbl)
+            db_conn.cursor().execute(sql, [repo_label])
 
-    states[repo_label] = {}
-    repos[repo_label] = repo
+        states[repo_label] = {}
+        repos[repo_label] = repo
 
     for pull in repo.iter_pulls(state='open'):
-        db_query(db, 'SELECT status FROM pull WHERE repo = ? AND num = ?', [repo_label, pull.number])
-        row = db.fetchone()
-        if row:
-            status = row[0]
-        else:
-            status = ''
-            for info in utils.github_iter_statuses(repo, pull.head.sha):
-                if info.context == 'homu':
-                    status = info.state
-                    break
+        with db.get_connection() as db_conn:
+            cursor = db_conn.cursor()
+            sql = 'SELECT status FROM pull WHERE repo = %s AND num = %s'
+            cursor.execute(sql, [repo_label, pull.number])
+            row = cursor.fetchone()
+            if row:
+                status = row[0]
+            else:
+                status = ''
+                for info in utils.github_iter_statuses(repo, pull.head.sha):
+                    if info.context == 'homu':
+                        status = info.state
+                        break
 
-        state = PullReqState(pull.number, pull.head.sha, status, db, repo_label, mergeable_que, gh, repo_cfg['owner'], repo_cfg['name'], repos)
+        state = PullReqState(pull.number, pull.head.sha, status, repo_label,
+                             mergeable_que, gh, repo_cfg['owner'],
+                             repo_cfg['name'], repos)
         state.title = pull.title
         state.body = pull.body
         state.head_ref = pull.head.repo[0] + ':' + pull.head.ref
@@ -562,7 +578,6 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
                     repo_cfg,
                     state,
                     my_username,
-                    db,
                     sha=comment.original_commit_id,
                 )
 
@@ -573,7 +588,6 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, db, mergeable_q
                 repo_cfg,
                 state,
                 my_username,
-                db,
             )
 
         state.save()
@@ -615,126 +629,114 @@ def main():
     repo_labels = {}
     mergeable_que = Queue()
 
-    db_conn = sqlite3.connect('main.db', check_same_thread=False, isolation_level=None)
-    db = db_conn.cursor()
+    db = Database()
+    with db.get_connection() as db_conn:
+        schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+        schema = open(schema_path).read()
+        # execute with multi=True requires enumeration.
+        list(db_conn.cursor().execute(multi=True, operation=schema))
 
-    db_query(db, '''CREATE TABLE IF NOT EXISTS pull (
-        repo TEXT NOT NULL,
-        num INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        merge_sha TEXT,
-        title TEXT,
-        body TEXT,
-        head_sha TEXT,
-        head_ref TEXT,
-        base_ref TEXT,
-        assignee TEXT,
-        approved_by TEXT,
-        priority INTEGER,
-        try_ INTEGER,
-        rollup INTEGER,
-        UNIQUE (repo, num)
-    )''')
+        for repo_label, repo_cfg in cfg['repo'].items():
+            repo_cfgs[repo_label] = repo_cfg
+            repo_labels[repo_cfg['owner'], repo_cfg['name']] = repo_label
 
-    db_query(db, '''CREATE TABLE IF NOT EXISTS build_res (
-        repo TEXT NOT NULL,
-        num INTEGER NOT NULL,
-        builder TEXT NOT NULL,
-        res INTEGER,
-        url TEXT NOT NULL,
-        merge_sha TEXT NOT NULL,
-        UNIQUE (repo, num, builder)
-    )''')
+            repo_states = {}
+            repos[repo_label] = None
 
-    db_query(db, '''CREATE TABLE IF NOT EXISTS mergeable (
-        repo TEXT NOT NULL,
-        num INTEGER NOT NULL,
-        mergeable INTEGER NOT NULL,
-        UNIQUE (repo, num)
-    )''')
+            cursor = db_conn.cursor()
+            cursor.execute('SELECT num, head_sha, status, title, body, ' \
+                           'head_ref, base_ref, assignee, approved_by, ' \
+                           'priority, try_, rollup, merge_sha FROM pull ' \
+                           'WHERE repo = %s', [repo_label])
+            for (num, head_sha, status, title, body, head_ref, base_ref,
+                    assignee, approved_by, priority, try_, rollup,
+                    merge_sha) in cursor.fetchall():
+                state = PullReqState(num, head_sha, status, repo_label,
+                                     mergeable_que, gh, repo_cfg['owner'],
+                                     repo_cfg['name'], repos)
+                state.title = title
+                state.body = body
+                state.head_ref = head_ref
+                state.base_ref = base_ref
+                state.set_mergeable(None)
+                state.assignee = assignee
 
-    for repo_label, repo_cfg in cfg['repo'].items():
-        repo_cfgs[repo_label] = repo_cfg
-        repo_labels[repo_cfg['owner'], repo_cfg['name']] = repo_label
+                state.approved_by = approved_by
+                state.priority = int(priority)
+                state.try_ = bool(try_)
+                state.rollup = bool(rollup)
 
-        repo_states = {}
-        repos[repo_label] = None
+                if merge_sha:
+                    if 'buildbot' in repo_cfg:
+                        builders = repo_cfg['buildbot']['builders']
+                    elif 'travis' in repo_cfg:
+                        builders = ['travis']
+                    elif 'status' in repo_cfg:
+                        builders = ['status']
+                    elif 'testrunners' in repo_cfg:
+                        builders = repo_cfg['testrunners'].get('builders', [])
+                    else:
+                        raise RuntimeError('Invalid configuration')
 
-        db_query(db, 'SELECT num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, merge_sha FROM pull WHERE repo = ?', [repo_label])
-        for num, head_sha, status, title, body, head_ref, base_ref, assignee, approved_by, priority, try_, rollup, merge_sha in db.fetchall():
-            state = PullReqState(num, head_sha, status, db, repo_label, mergeable_que, gh, repo_cfg['owner'], repo_cfg['name'], repos)
-            state.title = title
-            state.body = body
-            state.head_ref = head_ref
-            state.base_ref = base_ref
-            state.set_mergeable(None)
-            state.assignee = assignee
+                    state.init_build_res(builders, use_db=False)
+                    state.merge_sha = merge_sha
 
-            state.approved_by = approved_by
-            state.priority = int(priority)
-            state.try_ = bool(try_)
-            state.rollup = bool(rollup)
+                elif state.status == 'pending':
+                    # FIXME: There might be a better solution
+                    state.status = ''
 
-            if merge_sha:
-                if 'buildbot' in repo_cfg:
-                    builders = repo_cfg['buildbot']['builders']
-                elif 'travis' in repo_cfg:
-                    builders = ['travis']
-                elif 'status' in repo_cfg:
-                    builders = ['status']
-                elif 'testrunners' in repo_cfg:
-                    builders = repo_cfg['testrunners'].get('builders', [])
-                else:
-                    raise RuntimeError('Invalid configuration')
+                    state.save()
 
-                state.init_build_res(builders, use_db=False)
-                state.merge_sha = merge_sha
+                repo_states[num] = state
 
-            elif state.status == 'pending':
-                # FIXME: There might be a better solution
-                state.status = ''
+            states[repo_label] = repo_states
 
-                state.save()
+        cursor = db_conn.cursor()
+        cursor.execute('SELECT repo, num, builder, res, url, merge_sha FROM build_res')
+        for repo_label, num, builder, res, url, merge_sha in cursor.fetchall():
+            try:
+                state = states[repo_label][num]
+                if builder not in state.build_res: raise KeyError
+                if state.merge_sha != merge_sha: raise KeyError
+            except KeyError:
+                cursor = db_conn.cursor()
+                cursor.execute('DELETE FROM build_res WHERE repo = %s AND ' \
+                               'num = %s AND builder = %s',
+                               [repo_label, num, builder])
+                continue
 
-            repo_states[num] = state
+            state.build_res[builder] = {
+                'res': bool(res) if res is not None else None,
+                'url': url,
+            }
 
-        states[repo_label] = repo_states
+        cursor = db_conn.cursor()
+        cursor.execute('SELECT repo, num, mergeable FROM mergeable')
+        for repo_label, num, mergeable in cursor.fetchall():
+            try: state = states[repo_label][num]
+            except KeyError:
+                cursor = db_conn.cursor()
+                cursor.execute('DELETE FROM mergeable WHERE repo = %s AND ' \
+                               'num = %s', [repo_label, num])
+                continue
 
-    db_query(db, 'SELECT repo, num, builder, res, url, merge_sha FROM build_res')
-    for repo_label, num, builder, res, url, merge_sha in db.fetchall():
-        try:
-            state = states[repo_label][num]
-            if builder not in state.build_res: raise KeyError
-            if state.merge_sha != merge_sha: raise KeyError
-        except KeyError:
-            db_query(db, 'DELETE FROM build_res WHERE repo = ? AND num = ? AND builder = ?', [repo_label, num, builder])
-            continue
+            state.mergeable = bool(mergeable) if mergeable is not None else None
 
-        state.build_res[builder] = {
-            'res': bool(res) if res is not None else None,
-            'url': url,
-        }
+        queue_handler_lock = Lock()
+        def queue_handler():
+            with queue_handler_lock:
+                return process_queue(states, repos, repo_cfgs, logger,
+                                     buildbot_slots)
 
-    db_query(db, 'SELECT repo, num, mergeable FROM mergeable')
-    for repo_label, num, mergeable in db.fetchall():
-        try: state = states[repo_label][num]
-        except KeyError:
-            db_query(db, 'DELETE FROM mergeable WHERE repo = ? AND num = ?', [repo_label, num])
-            continue
+        from . import server
+        Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs,
+                                          repos, logger, buildbot_slots,
+                                          my_username, repo_labels,
+                                          mergeable_que, gh]).start()
 
-        state.mergeable = bool(mergeable) if mergeable is not None else None
+        Thread(target=fetch_mergeability, args=[mergeable_que]).start()
 
-    queue_handler_lock = Lock()
-    def queue_handler():
-        with queue_handler_lock:
-            return process_queue(states, repos, repo_cfgs, logger, buildbot_slots, db)
-
-    from . import server
-    Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs, repos, logger, buildbot_slots, my_username, db, repo_labels, mergeable_que, gh]).start()
-
-    Thread(target=fetch_mergeability, args=[mergeable_que]).start()
-
-    queue_handler()
+        queue_handler()
 
 if __name__ == '__main__':
     main()
