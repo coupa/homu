@@ -197,7 +197,10 @@ def github():
 
     owner_info = info['repository']['owner']
     owner = owner_info.get('login') or owner_info['name']
-    repo_label = g.repo_labels[owner, info['repository']['name']]
+    try:
+        repo_label = g.repo_labels[owner, info['repository']['name']]
+    except KeyError:
+        abort(500, 'Unknown repository')
     repo_cfg = g.repo_cfgs[repo_label]
 
     hmac_method, hmac_sig = request.headers['X-Hub-Signature'].split('=')
