@@ -736,6 +736,13 @@ def main():
 
         Thread(target=fetch_mergeability, args=[mergeable_que]).start()
 
+
+        for repo_label, repo_cfg in cfg['repo'].items():
+            t = Thread(target=synchronize,
+                       args=[repo_label, repo_cfg, logger, gh, states, repos,
+                             mergeable_que, my_username, repo_labels])
+            t.start()
+
         queue_handler()
 
 if __name__ == '__main__':
