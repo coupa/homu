@@ -625,6 +625,9 @@ def main():
 
     gh = github3.login(token=cfg['github']['access_token'])
 
+    if args.verbose:
+        logger.debug('Github rate limit status: {}'.format(gh.rate_limit()))
+
     states = {}
     repos = {}
     repo_cfgs = {}
