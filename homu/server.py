@@ -244,7 +244,11 @@ def github():
         head_sha = info['pull_request']['head']['sha']
 
         if action == 'synchronize':
-            state = g.states[repo_label][pull_num]
+            try:
+                state = g.states[repo_label][pull_num]
+            except KeyError:
+                logger.error('Unknown PR.')
+                abort(500)
             state.head_advanced(head_sha)
 
             state.save()
@@ -282,7 +286,11 @@ def github():
                 g.queue_handler()
 
         elif action == 'closed':
-            del g.states[repo_label][pull_num]
+            try:
+                del g.states[repo_label][pull_num]
+            except KeyError:
+                logger.error('Unknown PR.')
+                abort(500)
 
             with db.get_connection() as db_conn:
                 sql = 'DELETE FROM {} WHERE repo = %s AND num = %s'
@@ -293,7 +301,11 @@ def github():
             g.queue_handler()
 
         elif action in ['assigned', 'unassigned']:
-            state = g.states[repo_label][pull_num]
+            try:
+                state = g.states[repo_label][pull_num]
+            except KeyError:
+                logger.error('Unknown PR.')
+                abort(500)
             state.assignee = info['pull_request']['assignee']['login'] if info['pull_request']['assignee'] else ''
 
             state.save()
