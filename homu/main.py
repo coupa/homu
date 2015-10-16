@@ -502,10 +502,14 @@ def fetch_mergeability(mergeable_que):
         try:
             state, cause = mergeable_que.get()
 
-            mergeable = state.get_repo().pull_request(state.num).mergeable
+            pr = state.get_repo().pull_request(state.num)
+            if pr is None:
+                time.sleep(5)
+                pr = state.get_repo().pull_request(state.num)
+            mergeable = pr.mergeable
             if mergeable is None:
                 time.sleep(5)
-                mergeable = state.get_repo().pull_request(state.num).mergeable
+                mergeable = pr.mergeable
 
             if state.mergeable is True and mergeable is False:
                 if cause:
