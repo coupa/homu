@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 import github3
 import os
 import toml
@@ -625,8 +626,14 @@ def main():
 
     gh = github3.login(token=cfg['github']['access_token'])
 
-    if args.verbose:
-        logger.debug('Github rate limit status: {}'.format(gh.rate_limit()))
+    rate_limit = gh.rate_limit()
+    logger.debug('Github rate limit status: {}'.format(rate_limit))
+    if not rate_limit['rate']['remaining']:
+        reset_time = datetime.fromtimestamp(rate_limit['rate']['reset'])
+        logger_msg = 'Github rate limit exhausted! Sleeping until {}'
+        logger.info(logger_msg.format(reset_time.isoformat()))
+        reset_delta = reset_time - datetime.now()
+        time.sleep(reset_delta.total_seconds())
 
     states = {}
     repos = {}
