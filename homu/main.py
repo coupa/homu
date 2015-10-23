@@ -361,7 +361,7 @@ def start_build(state, repo_cfgs, buildbot_slots, logger):
         branch = repo_cfg.get('branch', {}).get('auto', 'auto')
         builders = ['status']
     elif 'testrunners' in repo_cfg:
-        branch = repo_cfg.get('branch', {}).get('auto', 'auto')
+        branch = 'merge_bot_{}'.format(state.base_ref)
         builders = repo_cfg['testrunners'].get('builders', [])
     else:
         raise RuntimeError('Invalid configuration')
