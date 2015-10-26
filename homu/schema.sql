@@ -35,3 +35,10 @@ CREATE TABLE IF NOT EXISTS mergeable (
     mergeable INTEGER NOT NULL,
     PRIMARY KEY (id),
     UNIQUE unique_index (repo, num));
+
+CREATE TABLE IF NOT EXISTS build_triggers (
+    branch TEXT NOT NULL,
+    trigger_sha VARCHAR(255) NOT NULL,
+    target_sha VARCHAR(255) NOT NULL,
+    build_count TINYINT UNSIGNED NOT NULL,
+    PRIMARY KEY (trigger_sha));

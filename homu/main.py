@@ -317,7 +317,13 @@ def parse_commands(body, username, repo_cfg, state, my_username, *,
 
     return state_changed
 
-def create_merge(state, repo_cfg, branch):
+def create_merge(state, repo_cfg, trigger_author_cfg, branch, gh):
+    def report_error(desc):
+        state.set_status('error')
+        utils.github_create_status(state.get_repo(), state.head_sha, 'error',
+                                   '', desc[:140], context='merge-test')
+        state.add_comment(':x: {}'.format(desc))
+
     base_sha = state.get_repo().ref('heads/' + state.base_ref).object.sha
     utils.github_set_ref(
         state.get_repo(),
@@ -338,18 +344,66 @@ def create_merge(state, repo_cfg, branch):
     try: merge_commit = state.get_repo().merge(branch, state.head_sha, merge_msg)
     except github3.models.GitHubError as e:
         if e.code != 409: raise
-
-        state.set_status('error')
-        desc = 'Merge conflict'
-        utils.github_create_status(state.get_repo(), state.head_sha, 'error', '', desc, context='homu')
-
-        state.add_comment(':lock: ' + desc)
-
+        report_error('Merge conflict')
         return None
+
+    # Solano's CI Mode can be set either to PR or ON. In ON mode, it
+    # builds on every branch update, which means it gets triggered on
+    # the above call to github_set_ref. We must therefore issue a PR on
+    # the merge node, in order to only trigger Solano to build on the
+    # intended node.
+    db = Database()
+    message = 'Build trigger for {}'.format(merge_msg)
+    pr_branch_name = '{}_build_trigger_{}'.format(branch, merge_commit.sha)
+    pr_branch = utils.github_set_ref(repo=state.get_repo(),
+                                     ref='heads/{}'.format(pr_branch_name),
+                                     sha=merge_commit.sha,
+                                     force=True)
+    if pr_branch:
+        author = {'name': trigger_author_cfg.get('name', 'homu'),
+                  'email': trigger_author_cfg.get('email', 'homu@invalid'),
+                  'date': datetime.now(timezone.utc).isoformat()}
+        created_file = state.get_repo().create_file(path='zero',
+                                                    message=message,
+                                                    content=b'0',
+                                                    branch=pr_branch_name,
+                                                    committer=author,
+                                                    author=author)
+        if 'commit' in created_file:
+            commit = created_file.get('commit')
+            time.sleep(2) # GitHub sometimes needs a moment here.
+            try:
+                pr = state.get_repo().create_pull(title=message,
+                                                  base=branch,
+                                                  head=pr_branch_name)
+            except github3.models.GitHubError as e0:
+                for e1 in e0.errors:
+                    report_error(e1['message'])
+                pr = None
+            if pr:
+                with db.get_connection() as db_conn:
+                    try:
+                        build_count = len(repo_cfg['testrunners']['builders'])
+                    except KeyError:
+                        build_count = 0
+                    sql = 'REPLACE INTO build_triggers ' \
+                          '(branch, trigger_sha, target_sha, build_count) ' \
+                          'VALUES (%s, %s, %s, %s)'
+                    db_conn.cursor().execute(sql, [pr_branch_name,
+                                                   commit.sha,
+                                                   merge_commit.sha,
+                                                   build_count])
+                    db_conn.commit()
+            else:
+                report_error('Failed to create pull.')
+        else:
+            report_error('Failed to create commit.')
+    else:
+        report_error('Failed to create PR branch.')
 
     return merge_commit
 
-def start_build(state, repo_cfgs, buildbot_slots, logger):
+def start_build(state, repo_cfgs, trigger_author_cfg, buildbot_slots, logger, gh):
     if buildbot_slots[0]:
         return True
 
@@ -373,7 +427,7 @@ def start_build(state, repo_cfgs, buildbot_slots, logger):
     else:
         raise RuntimeError('Invalid configuration')
 
-    merge_commit = create_merge(state, repo_cfg, branch)
+    merge_commit = create_merge(state, repo_cfg, trigger_author_cfg, branch, gh)
     if not merge_commit:
         return False
 
@@ -472,13 +526,14 @@ def start_rebuild(state, repo_cfgs):
 
     return True
 
-def start_build_or_rebuild(state, repo_cfgs, *args):
+def start_build_or_rebuild(state, repo_cfgs, trigger_author_cfg, gh, *args):
     if start_rebuild(state, repo_cfgs):
         return True
 
-    return start_build(state, repo_cfgs, *args)
+    return start_build(state, repo_cfgs, trigger_author_cfg, gh, *args)
 
-def process_queue(states, repos, repo_cfgs, logger, buildbot_slots):
+def process_queue(states, repos, repo_cfgs, trigger_author_cfg, logger,
+                  buildbot_slots, gh):
     for repo_label, repo in repos.items():
         repo_states = sorted(states[repo_label].values())
 
@@ -487,7 +542,8 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots):
                 break
 
             elif state.status == '' and state.approved_by:
-                if start_build_or_rebuild(state, repo_cfgs, buildbot_slots, logger):
+                if start_build_or_rebuild(state, repo_cfgs, trigger_author_cfg,
+                                          buildbot_slots, logger, gh):
                     return
 
             elif state.status == 'success' and state.try_ and state.approved_by:
@@ -495,12 +551,12 @@ def process_queue(states, repos, repo_cfgs, logger, buildbot_slots):
 
                 state.save()
 
-                if start_build(state, repo_cfgs, buildbot_slots, logger):
+                if start_build(state, repo_cfgs, trigger_author_cfg, buildbot_slots, logger, gh):
                     return
 
         for state in repo_states:
             if state.status == '' and state.try_:
-                if start_build(state, repo_cfgs, buildbot_slots, logger):
+                if start_build(state, repo_cfgs, trigger_author_cfg, buildbot_slots, logger, gh):
                     return
 
 def fetch_mergeability(mergeable_que):
@@ -642,6 +698,8 @@ def main():
         with open('cfg.json') as fp:
             cfg = json.loads(fp.read())
 
+    trigger_author_cfg = cfg.get('trigger_author', {})
+
     gh = github3.login(token=cfg['github']['access_token'])
 
     rate_limit = gh.rate_limit()
@@ -759,8 +817,9 @@ def main():
         queue_handler_lock = Lock()
         def queue_handler():
             with queue_handler_lock:
-                return process_queue(states, repos, repo_cfgs, logger,
-                                     buildbot_slots)
+                return process_queue(states, repos, repo_cfgs,
+                                     trigger_author_cfg, logger,
+                                     buildbot_slots, gh)
 
         from . import server
         Thread(target=server.start, args=[cfg, states, queue_handler, repo_cfgs,

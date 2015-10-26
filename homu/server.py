@@ -578,6 +578,7 @@ def travis():
 def testrunner_callback():
     builder = request.path.lstrip('/')
     logger = g.logger.getChild(builder)
+    trigger_ready_for_delete = False
 
     debug = lambda msg: lazy_debug(logger, lambda: msg)
 
@@ -585,13 +586,38 @@ def testrunner_callback():
         logger.error(log_msg)
         abort()
 
+    db = Database()
+
     postdata = {k:v for k,v in request.POST.allitems()}
     debug('postdata: {}'.format(postdata))
 
     try:
-        commit = request.POST['commit']
+        commit = hmac_commit = request.POST['commit']
     except KeyError:
         error('POST to /{} specified no commit.'.format(builder))
+    with db.get_connection() as db_conn:
+        cursor = db_conn.cursor()
+        sql = 'SELECT branch, target_sha, build_count ' \
+              'FROM build_triggers WHERE trigger_sha = %s'
+        cursor.execute(sql, [commit])
+        row = cursor.fetchone()
+        if row:
+            trigger_branch, target_sha, build_count = row
+            debug('Using target {} from trigger {}.'.format(target_sha,
+                                                            commit))
+            cursor = db_conn.cursor()
+            build_count -= 1
+            if 0 < build_count:
+                sql = 'UPDATE build_triggers SET build_count = %s ' \
+                      'WHERE trigger_sha = %s'
+                cursor.execute(sql, [build_count, commit])
+            else:
+                trigger_ready_for_delete = True
+                sql = 'DELETE FROM build_triggers WHERE trigger_sha = %s'
+                cursor.execute(sql, [commit])
+            db_conn.commit()
+            hmac_commit = commit
+            commit = target_sha
     try:
         state, repo_label = find_state(commit)
     except ValueError:
@@ -607,7 +633,7 @@ def testrunner_callback():
     except KeyError:
         error('Configuration is missing {}.key.'.format(builder))
 
-    msg = '{}:{}'.format(commit, request.POST['success']).encode('utf-8')
+    msg = '{}:{}'.format(hmac_commit, request.POST['success']).encode('utf-8')
     authentic_hmac = hmac.HMAC(key, msg, hashlib.sha256).hexdigest()
     try:
         provided_hmac = request.POST['hmac']
@@ -625,6 +651,9 @@ def testrunner_callback():
                      state=state,
                      logger=logger,
                      context='merge-test/{}'.format(builder))
+
+    if trigger_ready_for_delete:
+        state.get_repo().ref('heads/{}'.format(trigger_branch)).delete()
 
 def synch(user_gh, state, repo_label, repo_cfg, repo):
     if not repo.is_collaborator(user_gh.user().login):
