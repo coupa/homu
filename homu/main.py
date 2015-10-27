@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import github3
 import os
 import toml
@@ -551,6 +551,14 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
         repos[repo_label] = repo
 
     for pull in repo.iter_pulls(state='open'):
+        # Ignore PRs older than about two months.
+        update_delta = datetime.now(timezone.utc) - pull.updated_at
+        if 5e6 < update_delta.total_seconds():
+            logger.debug('Ignoring PR for merge {} because it has not ' \
+                         'been updated since {}.'.format(pull.merge_commit_sha,
+                                                         pull.updated_at))
+            continue
+
         with db.get_connection() as db_conn:
             cursor = db_conn.cursor()
             sql = 'SELECT status FROM pull WHERE repo = %s AND num = %s'
