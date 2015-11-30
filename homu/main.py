@@ -609,6 +609,8 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
 
     logger.info('Done synchronizing {}!'.format(repo_label))
 
+    logger.debug('Github rate limit status: {}'.format(gh.rate_limit()))
+
 def arguments():
     parser = argparse.ArgumentParser(description =
                                      'A bot that integrates with GitHub and '
