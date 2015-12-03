@@ -119,12 +119,14 @@ class PullReqState:
         with self.db.get_connection() as db_conn:
             db_conn.cursor().execute(sql, [self.status, self.repo_label,
                                            self.num])
+            db_conn.commit()
 
             # FIXME: self.try_ should also be saved in the database
             if not self.try_:
                 sql = 'UPDATE pull SET merge_sha = %s WHERE repo = %s AND num = %s'
                 db_conn.cursor().execute(sql, [self.merge_sha, self.repo_label,
                                                self.num])
+                db_conn.commit()
 
     def get_status(self):
         return 'approved' if self.status == '' and self.approved_by and self.mergeable is not False else self.status
@@ -138,6 +140,7 @@ class PullReqState:
             with self.db.get_connection() as db_conn:
                 db_conn.cursor().execute(sql, [self.repo_label, self.num,
                                                self.mergeable])
+                db_conn.commit()
         else:
             if que:
                 self.mergeable_que.put([self, cause])
@@ -147,6 +150,7 @@ class PullReqState:
             with self.db.get_connection() as db_conn:
                 sql = 'DELETE FROM mergeable WHERE repo = %s AND num = %s'
                 db_conn.cursor().execute(sql, [self.repo_label, self.num])
+                db_conn.commit()
 
     def init_build_res(self, builders, *, use_db=True):
         self.build_res = {x: {
@@ -158,6 +162,7 @@ class PullReqState:
             with self.db.get_connection() as db_conn:
                 sql = 'DELETE FROM build_res WHERE repo = %s AND num = %s'
                 db_conn.cursor().execute(sql, [self.repo_label, self.num])
+                db_conn.commit()
 
     def set_build_res(self, builder, res, url):
         if builder not in self.build_res:
@@ -175,6 +180,7 @@ class PullReqState:
                                      '(%s, %s, %s, %s, %s, %s)',
                                      [self.repo_label, self.num, builder, res,
                                       url, self.merge_sha])
+            db_conn.commit()
 
     def build_res_summary(self):
         return ', '.join('{}: {}'.format(builder, data['res'])
@@ -203,6 +209,7 @@ class PullReqState:
                                       self.base_ref, self.assignee,
                                       self.approved_by, self.priority,
                                       self.try_, self.rollup])
+            db_conn.commit()
 
     def refresh(self):
         issue = self.get_repo().issue(self.num)
@@ -546,6 +553,7 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
         for tbl in ['pull', 'build_res', 'mergeable']:
             sql = 'DELETE FROM {} WHERE repo = %s'.format(tbl)
             db_conn.cursor().execute(sql, [repo_label])
+        db_conn.commit()
 
         states[repo_label] = {}
         repos[repo_label] = repo
@@ -727,6 +735,7 @@ def main():
                 cursor.execute('DELETE FROM build_res WHERE repo = %s AND ' \
                                'num = %s AND builder = %s',
                                [repo_label, num, builder])
+                db_conn.commit()
                 continue
 
             state.build_res[builder] = {
@@ -742,6 +751,7 @@ def main():
                 cursor = db_conn.cursor()
                 cursor.execute('DELETE FROM mergeable WHERE repo = %s AND ' \
                                'num = %s', [repo_label, num])
+                db_conn.commit()
                 continue
 
             state.mergeable = bool(mergeable) if mergeable is not None else None

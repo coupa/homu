@@ -297,6 +297,7 @@ def github():
                 for tbl in ['pull', 'build_res', 'mergeable']:
                     db_conn.cursor().execute(sql.format(tbl), [repo_label,
                                                                pull_num])
+                    db_conn.commit()
 
             g.queue_handler()
 
@@ -665,6 +666,7 @@ def admin():
             sql = 'DELETE FROM {} WHERE repo = %s'.format(tbl)
             with db.get_connection() as db_conn:
                 db_conn.cursor().execute(sql, [repo_label])
+                db_conn.commit()
 
         del g.states[repo_label]
         del g.repos[repo_label]
