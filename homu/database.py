@@ -1,6 +1,8 @@
 from contextlib import contextmanager
 from mysql.connector.pooling import MySQLConnectionPool
+from mysql.connector.errors import PoolError
 import threading
+import time
 import yaml
 
 
@@ -39,7 +41,16 @@ class Database(object, metaclass=Singleton):
 
     @contextmanager
     def get_connection(self):
-        connection = self.pool.get_connection()
+        def get_conn(attempt=0):
+            try:
+                return self.pool.get_connection()
+            except PoolError:
+                if 20 > attempt:
+                    time.sleep(0.2)
+                    return get_conn(attempt + 1)
+                else:
+                    raise
+        connection = get_conn()
         yield connection
         # connection.close() will fail with an unread_result.
         if connection._cnx.unread_result:
