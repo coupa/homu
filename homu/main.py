@@ -607,6 +607,7 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
 
     repo = gh.repository(repo_cfg['owner'], repo_cfg['name'])
 
+    # XXX This is dangerous. We have a publicly exposed method to desrtoy state.
     with db.get_connection() as db_conn:
         for tbl in ['pull', 'build_res', 'mergeable']:
             sql = 'DELETE FROM {} WHERE repo = %s'.format(tbl)

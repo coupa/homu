@@ -136,7 +136,7 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
     base_sha = repo.ref('heads/' + base_ref).object.sha
     utils.github_set_ref(
         user_repo,
-        'heads/' + repo_cfg.get('branch', {}).get('rollup', 'rollup'),
+        'heads/' + repo_cfg.get('branch', {}).get('rollup', 'rollup'), #XXX This is incompatible with testrunners config.
         base_sha,
         force=True,
     )
@@ -157,7 +157,7 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
             state.body,
         )
 
-        try: user_repo.merge(repo_cfg.get('branch', {}).get('rollup', 'rollup'), state.head_sha, merge_msg)
+        try: user_repo.merge(repo_cfg.get('branch', {}).get('rollup', 'rollup'), state.head_sha, merge_msg) #XXX This is incompatible with testrunners config.
         except github3.models.GitHubError as e:
             if e.code != 409: raise
 
@@ -171,11 +171,12 @@ def rollup(user_gh, state, repo_label, repo_cfg, repo):
         ', '.join('#{}'.format(x) for x in failures),
     )
 
+    # XXX Why do we create_pull if there were failures?
     try:
         pull = base_repo.create_pull(
             title,
             state.base_ref,
-            user_repo.owner.login + ':' + repo_cfg.get('branch', {}).get('rollup', 'rollup'),
+            user_repo.owner.login + ':' + repo_cfg.get('branch', {}).get('rollup', 'rollup'), #XXX This is incompatible with testrunners config.
             body,
         )
     except github3.models.GitHubError as e:
@@ -213,6 +214,8 @@ def github():
 
     event_type = request.headers['X-Github-Event']
 
+    # pull_request_review_comment is triggered when a comment is created
+    # on a portion of the unified diff of a pull request.
     if event_type == 'pull_request_review_comment':
         action = info['action']
         original_commit_id = info['comment']['original_commit_id']
@@ -399,6 +402,7 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
 
             if state.approved_by and not state.try_:
                 try:
+                    # TODO: Use lockit here.
                     utils.github_set_ref(
                         state.get_repo(),
                         'heads/' + state.base_ref,
