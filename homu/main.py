@@ -225,7 +225,9 @@ def sha_or_blank(sha):
 
 def parse_commands(body, username, repo_cfg, state, my_username, *,
                    realtime=False, sha=''):
-    if username not in repo_cfg['reviewers'] and username != my_username:
+    if 'ALL' != repo_cfg['reviewers'] and \
+            username not in repo_cfg['reviewers'] and \
+            username != my_username:
         return False
 
     state_changed = False
