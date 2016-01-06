@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from functools import partial
 from itertools import chain
 from queue import Queue
+import signal
 
 STATUS_TO_PRIORITY = {
     'success': 0,
@@ -842,4 +843,5 @@ def main():
         queue_handler()
 
 if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, lambda x, y: Database().close_all())
     main()

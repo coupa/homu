@@ -56,3 +56,6 @@ class Database(object, metaclass=Singleton):
         if connection._cnx.unread_result:
             connection._cnx.get_rows()
         connection.close()
+
+    def close_all(self):
+        self.pool.reset_session()
