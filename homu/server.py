@@ -401,13 +401,13 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
             state.add_comment(':white_check_mark: {} - {}'.format(desc, urls))
 
             if state.approved_by and not state.try_:
+                # TODO: Use lockit here.
+                repo = state.get_repo()
                 try:
-                    # TODO: Use lockit here.
                     utils.github_set_ref(
-                        state.get_repo(),
-                        'heads/' + state.base_ref,
-                        state.merge_sha,
-                    )
+                        repo,
+                        'heads/{}'.format(state.base_ref),
+                        state.merge_sha)
                 except github3.models.GitHubError as e:
                     state.set_status('error')
                     desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
@@ -416,6 +416,17 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                                                desc, context=context)
 
                     state.add_comment(':heavy_exclamation_mark: ' + desc)
+
+                else:
+                    # Delete the feature branch until we use lockit.
+                    prefix = '{}:'.format(repo.owner.login)
+                    pr_branch_name = state.head_ref.replace(prefix, 'heads/', 1)
+                    pr_branch = repo.ref(pr_branch_name)
+                    try:
+                        pr_branch.delete()
+                    except AttributeError as e:
+                        msg = ':x: Failed to delete PR branch `{}`'
+                        state.add_comment(msg.format(pr_branch_name))
 
     else:
         if state.status == 'pending':
