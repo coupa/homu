@@ -337,13 +337,11 @@ def create_merge(state, repo_cfg, trigger_author_cfg, branch, gh):
 
     state.refresh()
 
-    merge_msg = 'Auto merge of #{} - {}, r={}\n\n{}\n\n{}'.format(
+    merge_msg = 'Auto merge of #{} - {}, r={}\n\n{}'.format(
         state.num,
         state.head_ref,
         '<try>' if state.try_ else state.approved_by,
-        state.title,
-        state.body,
-    )
+        state.title)
     try: merge_commit = state.get_repo().merge(branch, state.head_sha, merge_msg)
     except github3.models.GitHubError as e:
         if e.code != 409: raise
