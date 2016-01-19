@@ -22,7 +22,7 @@ port = 54856
 owner = ""
 name = ""
 
-# who has r+ rights?
+# who has r+ rights? The keyword "ALL" may be used instead of a list.
 reviewers = ["barosl", "graydon"]
 
 ## branch names (these settings here are the defaults)
@@ -55,8 +55,22 @@ secret = ""
 ## found under <https://travis-ci.org/profile/info>.
 #token = ""
 
+## Use jenkins or solano for running tests.
+#[repo.NAME.testrunners]
+#builders = ['jenkins', 'solano']
+
+## Who issues PRs to trigger Solano?
+#[trigger_author]
+#name = "GITHUB USERNAME"
+#email = "GITHUB EMAIL ADDRESS"
+
 ## Use the Status API
 #[repo.NAME.status]
 #
 ## String label set by status updates
 #context = ""
+
+## Builds can be triggered when a code_reviewer status goes green.
+#[code_reviewer]
+#name = "STATUS CONTEXT"
+#target_branch_whitelist = "CSV BRANCH NAMES"

@@ -1,12 +1,17 @@
 # Homu
 
-[![Hommando]][Akemi Homura]
+Homu is one of the [main characters] in Puella Magi Madoka Magica.
 
-Homu is a bot that integrates with GitHub and your favorite continuous
-integration service, such as [Buildbot] or [Travis CI].
+Homu is also [a village in Iran] having 226 residents.
 
-[Hommando]: https://i.imgur.com/j0jNvHF.png
-[Akemi Homura]: https://wiki.puella-magi.net/Homura_Akemi
+Homu is also a bot that integrates with GitHub and your favorite
+continuous integration service, such as [Solano], [Jenkins], [Buildbot],
+or [Travis CI].
+
+[main characters]: https://wiki.puella-magi.net/Homura_Akemi
+[a village in Iran]: https://en.wikipedia.org/wiki/Homu
+[Solano]: https://www.solanolabs.com/
+[Jenkins]: https://jenkins-ci.org/
 [Buildbot]: http://buildbot.net/
 [Travis CI]: https://travis-ci.org/
 
@@ -62,8 +67,6 @@ support.
 ### How to install
 
 ```sh
-sudo apt-get install python3-venv
-
 pyvenv .venv
 . .venv/bin/activate
 
@@ -73,8 +76,19 @@ pip install homu
 
 # Development version
 
-git clone https://github.com/barosl/homu.git
+git clone https://github.com/coupa/homu.git
 pip install -e homu
+
+# Dependencies not explicitly required in the package at the moment
+
+cat requirements.txt                                                                                                                                   master
+-e git+git://github.com/coupa/homu.git#egg=homu
+--allow-external mysql-connector-python
+mysql-connector-python
+github3.py
+PyYAML==3.11
+
+pip install -r requirements.txt
 ```
 
 ### How to configure
@@ -95,6 +109,16 @@ pip install -e homu
  - Events: Issue Comment, Pull Request, Push
 
 4. Add a Webhook to your continuous integration service:
+
+ - Solano
+
+  A post_build script is required to post commit, success, url,
+  and hmac. At Coupa we use script/solano/post_build.sh
+
+ - Jenkins
+
+  A script is required to post commit, success, url, and hmac.
+  At Coupa we use devscripts/jenkins/ci-scripts/report-to-merge-bot.sh
 
  - Buildbot
 
