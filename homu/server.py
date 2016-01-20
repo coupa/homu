@@ -410,7 +410,8 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                         state.merge_sha)
                 except github3.models.GitHubError as e:
                     state.set_status('error')
-                    desc = 'Test was successful, but fast-forwarding failed: {}'.format(e)
+                    desc = 'Test was successful, but fast-forwarding to {} ' \
+                        'failed with `{}`'.format(state.merge_sha, e)
                     utils.github_create_status(state.get_repo(),
                                                state.head_sha, 'error', url,
                                                desc, context=context)
