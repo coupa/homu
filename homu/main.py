@@ -196,8 +196,22 @@ class PullReqState:
             assert repo.name == self.name
         return repo
 
-    def save(self):
+    def save(self, logger=None):
         with self.db.get_connection() as db_conn:
+            if logger:
+                sql = 'SELECT repo, num, status, merge_sha, title, body, head_sha, head_ref, base_ref, assignee, approved_by, priority, try_, rollup FROM pull WHERE num = %s' #XXX
+                cursor = db_conn.cursor()
+                cursor.execute(sql, [self.num]) #XXX
+                for (repo, num, status, merge_sha, title, body, head_sha, head_ref, base_ref, assignee, approved_by, priority, try_, rollup) in cursor.fetchall(): #XXX
+                    logger.debug('PullReqState save changes: ' + #XXX
+                                 'num: {} to {}; '.format(num, self.num) + #XXX
+                                 'status: {} to {}; '.format(status, self.status) + #XXX
+                                 'merge_sha: {} to {}; '.format(merge_sha, self.merge_sha) + #XXX
+                                 'title: {} to {}; '.format(title, self.title) + #XXX
+                                 'head_sha: {} to {}; '.format(head_sha, self.head_sha) + #XXX
+                                 'head_ref: {} to {}; '.format(head_ref, self.head_ref) + #XXX
+                                 'base_ref: {} to {}; '.format(base_ref, self.base_ref) + #XXX
+                                 'priority: {} to {}; '.format(priority, self.priority)) #XXX
             db_conn.cursor().execute('REPLACE INTO pull ' \
                                      '(repo, num, status, merge_sha, title, ' \
                                      'body, head_sha, head_ref, base_ref, ' \
@@ -618,15 +632,8 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
 
     repo = gh.repository(repo_cfg['owner'], repo_cfg['name'])
 
-    # XXX This is dangerous. We have a publicly exposed method to desrtoy state.
-    with db.get_connection() as db_conn:
-        for tbl in ['pull', 'build_res', 'mergeable']:
-            sql = 'DELETE FROM {} WHERE repo = %s'.format(tbl)
-            db_conn.cursor().execute(sql, [repo_label])
-        db_conn.commit()
-
-        states[repo_label] = {}
-        repos[repo_label] = repo
+    states[repo_label] = {}
+    repos[repo_label] = repo
 
     for pull in repo.iter_pulls(state='open'):
         # Ignore PRs older than about two months.
@@ -647,6 +654,8 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
             else:
                 status = ''
                 for info in utils.github_iter_statuses(repo, pull.head.sha):
+                    # XXX We could attempt to rebuild state here, but with
+                    # multiple testrunners.
                     if info.context == 'homu':
                         status = info.state
                         break
@@ -681,7 +690,7 @@ def synchronize(repo_label, repo_cfg, logger, gh, states, repos, mergeable_que,
                 my_username,
             )
 
-        state.save()
+        state.save(logger)
 
         states[repo_label][pull.number] = state
 
