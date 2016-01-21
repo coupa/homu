@@ -410,13 +410,15 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                         state.merge_sha)
                 except github3.models.GitHubError as e:
                     state.set_status('error')
-                    desc = 'Test was successful, but fast-forwarding to {} ' \
-                        'failed with `{}`'.format(state.merge_sha, e)
+                    desc = 'Test was successful, but fast-forwarding ' \
+                            '{} to {} failed with `{}`'.format(state.base_ref,
+                                                               state.merge_sha,
+                                                               e)
                     utils.github_create_status(state.get_repo(),
                                                state.head_sha, 'error', '',
                                                desc, context='fast-forward')
-
                     state.add_comment(':heavy_exclamation_mark: ' + desc)
+                    logger.error(desc)
 
                 else:
                     # Delete the feature branch until we use lockit.
