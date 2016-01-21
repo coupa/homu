@@ -413,8 +413,8 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                     desc = 'Test was successful, but fast-forwarding to {} ' \
                         'failed with `{}`'.format(state.merge_sha, e)
                     utils.github_create_status(state.get_repo(),
-                                               state.head_sha, 'error', url,
-                                               desc, context=context)
+                                               state.head_sha, 'error', '',
+                                               desc, context='fast-forward')
 
                     state.add_comment(':heavy_exclamation_mark: ' + desc)
 
