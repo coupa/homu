@@ -633,8 +633,13 @@ def testrunner_callback():
                 cursor.execute(sql, [build_count, commit])
             else:
                 trigger_ready_for_delete = True
-                sql = 'DELETE FROM build_triggers WHERE trigger_sha = %s'
-                cursor.execute(sql, [commit])
+                # XXX Temporarily keep expired build_triggers for debugging.
+                sql = 'UPDATE build_triggers SET build_count = %s ' \
+                      'WHERE trigger_sha = %s'
+                cursor.execute(sql, [build_count, commit])
+                # sql = 'DELETE FROM build_triggers WHERE trigger_sha = %s'
+                # cursor.execute(sql, [commit])
+                # XXX
             db_conn.commit()
             hmac_commit = commit
             commit = target_sha
