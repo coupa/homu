@@ -429,6 +429,10 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                         msg = ':x: Failed to delete PR branch `{}`'
                         state.add_comment(msg.format(pr_branch_name))
 
+                    merge_url = repo.commit(state.merge_sha).html_url
+                    msg = 'Successfully merged {} {}'.format(state.base_ref,
+                                                             merge_url)
+                    logger.info(msg)
     else:
         if state.status == 'pending':
             state.set_status('failure')
