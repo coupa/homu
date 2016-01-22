@@ -443,6 +443,8 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                                        'failure', url, desc, context=context)
 
             state.add_comment(':x: {} - [{}]({})'.format(desc, builder, url))
+            pr_url = state.get_repo().pull_request(state.num).html_url
+            logger.info('Merge declined ({}) {}'.format(desc, pr_url))
 
     g.queue_handler()
 
