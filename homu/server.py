@@ -597,6 +597,39 @@ def travis():
 
     return 'OK'
 
+@post('/teamcity')
+def testing_teamcity():
+    logger = g.logger.getChild('teamcity')
+    debug = lambda msg: lazy_debug(logger, lambda: msg)
+    postdata = {k:v for k,v in request.POST.allitems()}
+    debug('TeamCity postdata: {}'.format(postdata))
+    try:
+        commit = request.POST['commit']
+    except KeyError:
+        debug('TeamCity problem: POST specified no commit.')
+        commit = ''
+
+    try:
+        success = request.POST['success']
+    except KeyError:
+        debug('TeamCity problem: POST specified no success.')
+        success = ''
+
+    try:
+        url = request.POST['url']
+    except KeyError:
+        debug('TeamCity problem: POST specified no url.')
+
+    key = g.cfg['teamcity']['key'].encode('utf-8')
+    msg = '{}:{}'.format(commit, success).encode('utf-8')
+    authentic_hmac = hmac.HMAC(key, msg, hashlib.sha256).hexdigest()
+    try:
+        provided_hmac = request.POST['hmac']
+    except KeyError:
+        error('TeamCity problem: POST provided no hmac.')
+    if not hmac.compare_digest(provided_hmac, authentic_hmac):
+        error('TeamCity problem: On POST, status failed HMAC.')
+
 @post('/jenkins')
 @post('/solano')
 def testrunner_callback():
