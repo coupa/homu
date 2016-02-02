@@ -407,7 +407,8 @@ def report_build_res(succ, url, builder, repo_label, state, logger,
                     utils.github_set_ref(
                         repo,
                         'heads/{}'.format(state.base_ref),
-                        state.merge_sha)
+                        state.merge_sha,
+                        auto_create=False)
                 except github3.models.GitHubError as e:
                     state.set_status('error')
                     desc = 'Test was successful, but fast-forwarding ' \
