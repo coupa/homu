@@ -563,7 +563,7 @@ def process_queue(states, repos, repo_cfgs, trigger_author_cfg, logger,
                 if start_build(state, repo_cfgs, trigger_author_cfg, buildbot_slots, logger, gh):
                     return
 
-def fetch_mergeability(mergeable_que):
+def fetch_mergeability(mergeable_que, logger):
     re_pull_num = re.compile('(?i)merge (?:of|pull request) #([0-9]+)')
 
     while True:
@@ -574,10 +574,19 @@ def fetch_mergeability(mergeable_que):
             if pr is None:
                 time.sleep(5)
                 pr = state.get_repo().pull_request(state.num)
+            if pr is None:
+                state.add_comment(':x: Failed to get PR.')
+                logger.error('Failed to get PR for {}'.format(state.num))
+                return
+
             mergeable = pr.mergeable
             if mergeable is None:
                 time.sleep(5)
                 mergeable = pr.mergeable
+            if mergeable is None:
+                state.add_comment(':x: Failed to get mergeable state.')
+                logger.error('Failed to get mergeable state for {}'.format(state.num))
+                return
 
             if state.mergeable is True and mergeable is False:
                 if cause:
@@ -832,7 +841,7 @@ def main():
                                           my_username, repo_labels,
                                           mergeable_que, gh]).start()
 
-        Thread(target=fetch_mergeability, args=[mergeable_que]).start()
+        Thread(target=fetch_mergeability, args=[mergeable_que, logger]).start()
 
 
         for repo_label, repo_cfg in cfg['repo'].items():
