@@ -598,7 +598,10 @@ def fetch_mergeability(mergeable_que, logger):
                 time.sleep(5)
                 mergeable = pr.mergeable
             if mergeable is None:
-                state.add_comment(':x: Failed to get mergeable state.')
+                # XXX Temporarily eliminating the github comment because it is
+                # XXX sending daily emails on merged PRs. See
+                # XXX https://github.com/coupa/coupa_development/pull/24884
+                # state.add_comment(':x: Failed to get mergeable state.')
                 logger.error('Failed to get mergeable state for {}'.format(state.num))
                 return
 
